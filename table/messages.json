@@ -1,0 +1,7 @@
+{
+	"id" 		: "TEXT PRIMARY KEY",
+	"date_raw" 	: "TEXT",
+	"from_email": "TEXT",
+	"subject" 	: "TEXT",
+	"body" 		: "TEXT"
+}
