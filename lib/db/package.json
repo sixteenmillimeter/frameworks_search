@@ -1,0 +1,31 @@
+{
+  "name": "db",
+  "version": "0.0.1",
+  "description": "General purpose SQL db library for Postgres. Used for prototyping and then deployment.",
+  "main": "index.js",
+  "scripts": {
+    "test": "./node_modules/.bin/qunit",
+    "docs": "./node_modules/.bin/jsdoc2md index.js > Readme.md"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://git.downplane.net/modules/db.git"
+  },
+  "keywords": [
+    "module",
+    "db",
+    "postgres",
+    "sqlite"
+  ],
+  "author": "mmcwilliams",
+  "license": "MIT",
+  "private": true,
+  "dependencies": {
+    "pg": "^7.4.1",
+    "squel": "^5.12.0"
+  },
+  "devDependencies": {
+    "jsdoc-to-markdown": "^4.0.1",
+    "qunit": "^2.8.0"
+  }
+}

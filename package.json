@@ -17,11 +17,11 @@
   },
   "homepage": "https://github.com/sixteenmillimeter/frameworks_search#readme",
   "dependencies": {
-    "dblite": "file:lib/dblite",
+    "db": "file:lib/db",
     "fs-extra": "^6.0.1",
     "lodash": "^4.17.10",
     "node-mbox": "^1.0.0",
-    "sqlite3": "^4.0.1",
+    "pg": "^7.8.0",
     "squel": "^5.12.1"
   }
 }

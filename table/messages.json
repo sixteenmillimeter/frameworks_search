@@ -1,7 +1,9 @@
 {
-	"id" 		: "TEXT PRIMARY KEY",
-	"date_raw" 	: "TEXT",
-	"from_email": "TEXT",
-	"subject" 	: "TEXT",
-	"body" 		: "TEXT"
+	"id" 		: "VARCHAR PRIMARY KEY",
+	"date_raw" 	: "VARCHAR",
+	"date" 		: "BIGINT",
+	"from_email": "VARCHAR",
+	"subject" 	: "VARCHAR",
+	"body" 		: "VARCHAR",
+	"fulltext"  : "TSVECTOR"
 }
