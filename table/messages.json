@@ -1,8 +1,14 @@
 {
 	"id" 		: "VARCHAR PRIMARY KEY",
+	"original"  : "VARCHAR",
+	
 	"date_raw" 	: "VARCHAR",
 	"date" 		: "BIGINT",
+	
+	"response_to" :"VARCHAR",
 	"from_email": "VARCHAR",
+	"from_name" : "VARCHAR",
+	
 	"subject" 	: "VARCHAR",
 	"body" 		: "VARCHAR",
 	"fulltext"  : "TSVECTOR"
