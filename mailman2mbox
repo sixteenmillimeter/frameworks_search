@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""
+mailmanToMBox.py:  Inserts line feeds to create mbox format from Mailman Gzip'd
+Text archives decompressed
+Usage:   ./to-mbox.py  dir
+Where dir is a directory containing .txt files pulled from mailman Gzip'd Text and decompressed
+
+https://gist.github.com/CoryDolphin/1728592
+"""
+import sys
+import os
+import tokenize
+
+def main():
+    if len(sys.argv) !=2:
+        print(__doc__)
+        sys.exit()
+
+    rootDir = sys.argv[1]
+    numConv = 0
+    for root, dirs, files in os.walk(rootDir):
+        for fil in files:
+            if(fil.find('.txt') > -1):
+                inFile = os.path.join(rootDir,fil)
+                outFile = inFile.replace('.txt','.mbox')
+                print('Converting ',fil,' to mbox format')
+                if not makeMBox(inFile,outFile):
+                    print((outFile,' already exists, did not overwrite'))
+                else:
+                    numConv +=1
+    print('Converted ' ,str(numConv),'archives to mbox format')
+    
+
+def makeMBox(fIn,fOut):
+    '''
+    from http://lists2.ssc.com/pipermail/linux-list/2006-February/026220.html
+    '''
+    if not os.path.exists(fIn):
+        return False
+    if os.path.exists(fOut):
+        return False
+
+    out = open(fOut,"w")
+
+    lineNum = 0
+
+    # detect encoding
+    readsource =  open(fIn,'rb').__next__
+    fInCodec = tokenize.detect_encoding(readsource)[0]
+
+    for line in open(fIn,'rt', encoding=fInCodec, errors="replace"):
+        if line.find("From ") == 0:
+            if lineNum != 0:
+                out.write("\n")
+            lineNum +=1
+            line = line.replace(" at ", "@")
+        out.write(line)
+        
+            
+    out.close()
+    return True
+
+# INIT
+if __name__ == '__main__':
+    main()
