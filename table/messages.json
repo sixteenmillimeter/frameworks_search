@@ -11,5 +11,6 @@
 	
 	"subject" 	: "VARCHAR",
 	"body" 		: "VARCHAR",
+	"plaintext" : "VARCHAR",
 	"fulltext"  : "TSVECTOR"
 }

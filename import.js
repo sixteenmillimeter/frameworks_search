@@ -5,21 +5,22 @@
 
 //https://github.com/sixteenmillimeter/frameworks_archiver
 
-const fs = require('fs-extra');
-const _ = require('lodash');
-const path = require('path');
-const DB = require('db');
-const exec = require('child_process').exec;
+const fs = require('fs-extra')
+const _ = require('lodash')
+const path = require('path')
+const exec = require('child_process').exec
 const mbox = require('node-mbox')
 const moment = require('moment')
 const crypto = require('crypto')
 const textract = require('textract')
 
-const messages = new DB('messages');
+const DB = require('db')
+
+const messages = new DB('messages')
 
 const ARCHIVES = {
 	frameworks : '../frameworks_archiver/frameworks',
-	hi_beam : '../frameworks_archiver/hi-beam',
+	hi_beam : '../frameworks_archiver/hi-beam/www.hi-beam.net/fw',
 	archive_org : '../frameworks_archiver/archive-org/FRAMEWORKS'
 }
 
@@ -43,12 +44,17 @@ function hash (str) {
 	return crypto.createHash('sha256').update(str).digest('base64')
 }
 
+function escapeStr (str) {
+	return str.replace(singleRe, `''`);
+}
+
 async function to_messages (all, file) {
 	let lines = all.split(/\r?\n/)
 	let line
 	let msgs = []
 	let msg = ''
 	let obj
+	let stopped = false
 
 	for (let i =0; i < lines.length; i++) {
 		line = lines[i]
@@ -66,6 +72,10 @@ async function to_messages (all, file) {
 	}
 
 	console.dir(msgs.length)
+	//fs.writeFileSync('msg.txt', all, 'utf8')
+	//fs.writeFileSync('parsed.json', JSON.stringify(msgs, null, '\t'), 'utf8')
+	//process.exit()
+
 	for (let m of msgs) {
 		lines = m.split(/\r?\n/)
 		obj = {
@@ -80,8 +90,12 @@ async function to_messages (all, file) {
 			subject : null,
 			body : null
 		}
+		stopped = false;
+		//console.dir(m)
+
 		for (let l of lines ) {
 			try {
+				obj.original = file;
 				if (!obj.date_raw && _.startsWith(l, 'Date: ')) {
 					obj.date_raw = l.replace('Date:', '').trim()
 					obj.date = moment(obj.date_raw, 'ddd, DD MMM YYYY HH:mm:ss ZZ').unix() * 1000
@@ -117,25 +131,44 @@ async function to_messages (all, file) {
 				}
 				if (obj.body === null && _.startsWith(l, 'Message-ID: ')) {
 					obj.body = ''
-				} else if (typeof obj.body === 'string') {
-					obj.body += l + '\n'
+				} else if (typeof obj.body === 'string' && !stopped) {
+					//if (_.startsWith(l, 'From:') || _.startsWith('---- Original message ----')) {
+						//stopped = true;
+					//} else {
+						obj.body += l + '\n'
+					//}
 				}
 			} catch (err) {
 				console.error(err)
 				console.log(m)
+				process.exit(1)
 			}
 		}
 
+		if (obj.date_raw === null) {
+			//console.dir(lines)
+			continue;
+		}
+		//console.dir(obj)
+
+		obj.plaintext = '';
+
 		try {
-			if (obj.body) 		obj.body = obj.body.replace(singleRe, "''")
-			if (obj.subject) 	obj.subject = obj.subject.replace(singleRe, "''")
-			if (obj.from_name) 	obj.from_name = obj.from_name.replace(singleRe, "''")
+			if (obj.subject) {
+				obj.subject = escapeStr(obj.subject)
+				obj.plaintext += obj.subject + '\n'
+			}
+			if (obj.from_name) 	{
+				obj.from_name = escapeStr(obj.from_name)
+				obj.plaintext += obj.subject + '\n'
+			}
+			if (obj.body) {
+				obj.body = escapeStr(obj.body)
+				obj.plaintext += obj.body + '\n'
+			}
 		} catch (err) {
 			console.error('Error escaping', err)
 		}
-
-		if (obj.date === null) continue
-		//console.log(obj.body)
 
 		if (obj.body && obj.body.indexOf('<html>') !== -1 ) {
 			try {
@@ -144,10 +177,10 @@ async function to_messages (all, file) {
 				console.error(err)
 			}
 		}
-
+		
 		try {
-			await messages.insert(obj)
-			console.log('Inserted', obj)
+			await messages.insert(obj, true)
+			console.log('Inserted', obj.id)
 			//console.log(m)
 			//if (m.indexOf('Von: ') !== -1 && m.indexOf('> Von:') === -1) process.exit()
 		} catch (err) {
@@ -163,8 +196,8 @@ async function to_messages (all, file) {
 	//to_database()
 }
 
-async function import_files () {
-	console.time('import_files')
+async function import_frameworks () {
+	console.time('import_frameworks')
 	const ARCHIVE = path.join(__dirname, ARCHIVES.frameworks)
 	let files = await fs.readdir(ARCHIVE)
 	let filePath
@@ -186,16 +219,16 @@ async function import_files () {
 		}
 
 		try {
-			all = await fs.readFile(tmpPath, 'utf8');
+			all = await fs.readFile(tmpPath, 'utf8')
 			//console.dir(all)
 		} catch (err) {
 			console.error('Error reading temporary file', err)
 		}
 
 		try {
-			await to_messages(all);
+			await to_messages(all, file)
 		} catch (err) {
-			console.error(err);
+			console.error(err)
 		}
 
 		try {
@@ -204,7 +237,7 @@ async function import_files () {
 			console.error(`Error unlinking file ${tmpPath}`)
 		}
 	}
-	console.timeEnd('import_files')
+	console.timeEnd('import_frameworks')
 }
 
 async function log_to_messages (all, file) {
@@ -256,6 +289,7 @@ async function log_to_messages (all, file) {
 	"fulltext"  : "TSVECTOR"
 
 	*/
+	let count = 0;
 	for (let m of msgs) {
 		lines = m.split(/\r?\n/)
 		obj = {
@@ -297,13 +331,24 @@ async function log_to_messages (all, file) {
 			} catch (err) {
 				console.error(err)
 				console.log(m)
+				process.exit(1)
 			}
 		}
+		obj.plaintext = '';
 
 		try {
-			if (obj.body) 		obj.body = obj.body.replace(singleRe, "''")
-			if (obj.subject) 	obj.subject = obj.subject.replace(singleRe, "''")
-			if (obj.from_name) 	obj.from_name = obj.from_name.replace(singleRe, "''")
+			if (obj.subject) {
+				obj.subject = escapeStr(obj.subject)
+				obj.plaintext += obj.subject + '\n'
+			}
+			if (obj.from_name) 	{
+				obj.from_name = escapeStr(obj.from_name)
+				obj.plaintext += obj.subject + '\n'
+			}
+			if (obj.body) {
+				obj.body = escapeStr(obj.body)
+				obj.plaintext += obj.body + '\n'
+			}
 		} catch (err) {
 			console.error('Error escaping', err)
 		}
@@ -317,8 +362,10 @@ async function log_to_messages (all, file) {
 		}
 
 		try {
-			await messages.insert(obj, false )
+			//console.dir(obj)
+			await messages.insert(obj, true)
 			console.log('Inserted', obj.id )
+			count++;
 		} catch (err) {
 			if (err.code === '23505') {
 				console.warn('Already exists', obj.id)
@@ -328,6 +375,7 @@ async function log_to_messages (all, file) {
 			}
 		}
 	}
+	console.log(`Inserted ${count} messages`)
 	return true
 	//to_database();
 }
@@ -347,14 +395,13 @@ async function extractText (html) {
 			} catch (err) {
 				log.error('Error erasing tmp file', err)
 			}
-			return resolve(text.replace(singleRe, "''"))
+			return resolve(escapeStr(text))
 		})
 	})
 }
 
-async function import_logs () {
-	messages.connect()
-	console.time('import_logs')
+async function import_archiveorg () {
+	console.time('import_archiveorg')
 	let ARCHIVE = path.join(__dirname, ARCHIVES.archive_org)
 	let files = await fs.readdir(ARCHIVE)
 	let filePath
@@ -378,9 +425,60 @@ async function import_logs () {
 			console.error(err);
 		}
 	}
-	console.timeEnd('import_logs')
+	console.timeEnd('import_archiveorg')
 	process.exit()
 }
 
-//import_files();
-import_logs()
+async function import_hibeam () {
+	console.time('import_hibeam')
+	let ARCHIVE = path.join(__dirname, ARCHIVES.hi_beam)
+	let files = await fs.readdir(ARCHIVE)
+	console.timeEnd('import_hibeam')
+}
+
+async function tsvectors () {
+	const query = `SELECT id,plaintext FROM messages WHERE fulltext IS NULL;`
+	let res
+	let message
+	let txt
+	let tsvQuery
+
+	try {
+		res = await messages.query(query)
+	} catch (err) {
+		console.error(err)
+	}
+
+	for (let m of res.rows) {
+		try {
+			message = await messages.find(`id = '${m.id}'`, true)
+		} catch (err) {
+			console.error(err)
+		}
+		
+		txt = escapeStr(m.plaintext)
+		tsvQuery = `UPDATE messages SET fulltext = to_tsvector('${txt}') WHERE id = '${m.id}';`
+		
+		try {
+			await messages.query(tsvQuery)
+			console.log(`Added tsvector data to ${m.id}`)
+		} catch (err) {
+			console.error(err)
+		}
+	}
+}
+
+async function main () {
+	try {
+		await messages.connect()
+		//await import_frameworks()
+		//await import_archiveorg()
+		//await import_hibeam();
+		//await tsvectors()
+	} catch (err) {
+		console.error(err);
+	}
+	process.exit()
+}
+
+main();
