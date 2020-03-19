@@ -890,13 +890,14 @@ async function dedupe () {
 }
 
 async function threads () {
-	
+
 }
 
-function matchEmail (rows) {
+function matchEmail (rows, date) {
 	let email = ''
 	let lemail = ''
 	let match = true
+	let distance = Infinity
 	for (let row of rows) {
 		if (email === '') {
 			email = row.from_email
@@ -904,6 +905,19 @@ function matchEmail (rows) {
 		} else if (lemail !== row.from_email.toLowerCase()) {
 			match = false
 		}
+	}
+
+	if (!match) {
+		for (let row of rows) {
+			if (Math.abs(row.date - date) < distance) {
+				distance = Math.abs(row.date - date)
+				email = row.from_email
+				match = true
+			}
+		}
+		//console.dir(rows.map(el => el.from_email))
+		//console.log(rows[0].from_name)
+		//console.log(email)
 	}
 	return match ? email : null
 }
@@ -922,16 +936,17 @@ async function fillin () {
 	console.log(res.rows.length)
 
 	for (let row of res.rows) {
-		where = `from_name LIKE '${escapeStr(row.from_name)}' AND from_email IS NOT NULL AND ( original LIKE '%.txt%' OR original LIKE '%.txt.gz%')`
+		where = `from_name LIKE '${escapeStr(row.from_name.replace(`'undefined'`, ''))}' AND from_email IS NOT NULL AND ( original LIKE '%.txt%' OR original LIKE '%.txt.gz%')`
 			
 		try {
 			match = await messages.find(where, true)
 		} catch (err) {
 			console.error(err)
-			process.exit()
+			//process.exit()
+			continue
 		}
 		if (match.rows && match.rows.length > 0) {
-			email = matchEmail(match.rows)
+			email = matchEmail(match.rows, row.date)
 			if (!email) {
 				console.log(`Inconclusive matches found for ${row.from_name} from ${match.rows.length} matches`)
 				//console.dir(match.rows.map(el => el.from_email))
@@ -955,11 +970,11 @@ async function fillin () {
 async function main () {
 	try {
 		await messages.connect()
-		//await import_frameworks()
-		//await import_archiveorg()
-		//await import_hibeam()
+		await import_frameworks()
+		await import_archiveorg()
+		await import_hibeam()
 		await fillin()
-		//await tsvectors()
+		await tsvectors()
 	} catch (err) {
 		console.error(err);
 	}
