@@ -15,6 +15,7 @@ const crypto = require('crypto')
 const textract = require('textract')
 const cheerio = require('cheerio')
 const levenshtein = require('fast-levenshtein')
+const Mbox = require('node-mbox')
 
 const DB = require('db')
 
@@ -65,6 +66,9 @@ async function to_messages (all, file) {
 	let obj
 	let stopped = false
 
+
+
+
 	for (let i =0; i < lines.length; i++) {
 		line = lines[i]
 		if ((_.startsWith(line, 'From ') && _.startsWith(lines[i + 1], 'From: ')) ||
@@ -81,6 +85,7 @@ async function to_messages (all, file) {
 	}
 
 	console.dir(msgs.length)
+	//process.exit()
 	//fs.writeFileSync('msg.txt', all, 'utf8')
 	//fs.writeFileSync('parsed.json', JSON.stringify(msgs, null, '\t'), 'utf8')
 	//process.exit()
@@ -97,7 +102,8 @@ async function to_messages (all, file) {
 			from_name : null,
 
 			subject : null,
-			body : null
+			body : null,
+			complete : escapeStr(encodeURIComponent(m))
 		}
 		stopped = false;
 		//console.dir(m)
@@ -218,13 +224,171 @@ async function to_messages (all, file) {
 	//to_database()
 }
 
+async function from_mbox (mboxFile, file) {
+	console.log(mboxFile)
+
+	return new Promise((resolve, reject) => {
+		const mbox    = new Mbox(mboxFile, { /* options */ });
+		let count = 0;
+
+		mbox.on('message', async function (msg) {
+			const all = msg.toString()
+			const lines = all.split(/\r?\n/)
+			const obj = {
+				date_raw : null,
+				date : null,
+
+				original: file,
+				response_to : null,
+				from_email : null,
+				from_name : null,
+
+				subject : null,
+				body : null,
+				complete : escapeStr(encodeURIComponent(msg))
+			}
+			let stopped = false
+
+			for (let l of lines) {
+				try {
+					obj.original = file;
+					if (!obj.date_raw && _.startsWith(l, 'Date: ')) {
+						obj.date_raw = l.replace('Date:', '').trim()
+						obj.date = moment(obj.date_raw, 'ddd, DD MMM YYYY HH:mm:ss ZZ').unix() * 1000
+					}else if (!obj.date_raw && _.startsWith(l, 'Datum: ')) {
+						obj.date_raw = l.replace('Datum: ', '').trim()
+						obj.date = moment(obj.date_raw, 'ddd, DD MMM YYYY HH:mm:ss ZZ').unix() * 1000
+					} else if (!obj.subject && _.startsWith(l, 'Subject: ')) {
+						obj.subject = l.replace('Subject: ', '').trim()
+					} else if (!obj.subject && _.startsWith(l, 'Betreff: ')) {
+						obj.subject = l.replace('Betreff: ', '').trim()
+					} else if (!obj.from_name && _.startsWith(l, 'From: ')) {
+						if (l.indexOf('(') !== -1) {
+							obj.from_email = l.replace('From: ', '').trim().split('(')[0].trim()
+							obj.from_name = l.replace('From: ', '').trim().split('(')[1].replace(')', '').trim()
+							obj.from_email = obj.from_email.replace(' at ', '@')
+						} else {
+							obj.from_email = l.replace('From:', '').trim()
+							obj.from_email = obj.from_email.replace(' at ', '@')
+						}
+					} else if (!obj.from_name && _.startsWith(l, 'An: ')) {
+						if (l.indexOf('(') !== -1) {
+							obj.from_email = l.replace('An: ', '').trim().split('(')[0].trim()
+							obj.from_name = l.replace('An: ', '').trim().split('(')[1].replace(')', '').trim()
+							obj.from_email = obj.from_email.replace(' at ', '@')
+						} else {
+							obj.from_email = l.replace('An: ', '').trim()
+							obj.from_email = obj.from_email.replace(' at ', '@')
+						}
+					} else if (!obj.response_to && _.startsWith(l, 'In-Reply-To:')) {
+						obj.response_to = l.replace('In-Reply-To:', '').trim()
+					}
+					obj.id = hash(`${obj.date}-${obj.subject}-${obj.from_email}`)
+					if (obj.body === null && _.startsWith(l, 'Message-ID: ')) {
+						obj.body = ''
+					} else if (typeof obj.body === 'string' && !stopped) {
+						//if (_.startsWith(l, 'From:') || _.startsWith('---- Original message ----')) {
+							//stopped = true;
+						//} else {
+							obj.body += l + '\n'
+						//}
+					}
+				} catch (err) {
+					console.error(err)
+					console.log(m)
+					process.exit(1)
+				}
+			}
+			if (obj.date_raw === null) {
+				//console.dir(lines)
+				return;
+			}
+			if (_.startsWith(obj.subject, '[Frameworks] ')) {
+				obj.subject = obj.subject.replace('[Frameworks] ', '')
+			} else if (_.startsWith(obj.subject, 'Re: [Frameworks] ')) {
+				obj.subject = obj.subject.replace('Re: [Frameworks] ', 'Re: ')
+			}
+			//console.dir(obj)
+
+			obj.plaintext = '';
+
+			try {
+				if (obj.subject) {
+					obj.plaintext += obj.subject + '\n'
+					obj.subject = escapeStr(obj.subject)
+					
+				}
+				if (obj.from_name) 	{
+					obj.plaintext += obj.subject + '\n'
+					obj.from_name = escapeStr(obj.from_name)
+					
+				}
+				if (obj.body) {
+					obj.plaintext += obj.body + '\n'
+					obj.body = escapeStr(obj.body)
+					
+				}
+			} catch (err) {
+				console.error('Error escaping', err)
+			}
+
+			if (obj.body && obj.body.indexOf('<html>') !== -1 ) {
+				try {
+					obj.body = await extractText(obj.body)
+				} catch (err) {
+					console.error(err)
+				}
+				obj.plaintext += obj.body;
+				obj.body = escapeStr(obj.body)
+			}
+
+			if (obj.body === null) {
+				return
+			}
+
+			obj.plaintext = escapeStr(obj.plaintext)
+			
+			try {
+				await messages.insert(obj, true)
+				console.log('Inserted', obj.id)
+				count++
+				//console.log(m)
+				//if (m.indexOf('Von: ') !== -1 && m.indexOf('> Von:') === -1) process.exit()
+			} catch (err) {
+				if (err.code === '23505') {
+					console.warn('Already exists', obj.id)
+					//console.dir(obj.body)
+				} else {
+					console.error(err)
+					console.warn(`Cannot insert`)
+					//console.dir(obj)
+					//process.exit()
+				}
+			}
+			return true
+		})
+
+		mbox.on('error', function(err) {
+			console.error('got an error', err)
+			process.exit()
+		})
+
+		mbox.on('end', function() {
+			console.log(`Completed processing file ${file} with ${count} inserted`)
+			return resolve(true)
+		})
+	})
+}
+
 async function import_frameworks () {
 	console.time('import_frameworks')
 	const ARCHIVE = path.join(__dirname, ARCHIVES.frameworks)
 	let files = await fs.readdir(ARCHIVE)
 	let filePath
 	let tmpPath
+	let dir
 	let all
+	let date
 
 	files = files.filter(file => {
 		if (file.indexOf('.txt.gz') !== -1) return file
@@ -232,7 +396,15 @@ async function import_frameworks () {
 
 	for (let file of files) {
 		filePath = path.join(ARCHIVE, file)
-		tmpPath = `/tmp/${+new Date()}.txt`
+		date = new Date().getTime()
+		dir = `/tmp/${date}`
+		tmpPath = `/tmp/${date}/${date}.txt`
+
+		try {
+			await fs.mkdir(dir)
+		} catch (err) {
+			console.error(err)
+		}
 
 		try {
 			await asyncExec(`gunzip < "${filePath}" > "${tmpPath}"`)
@@ -241,14 +413,16 @@ async function import_frameworks () {
 		}
 
 		try {
-			all = await fs.readFile(tmpPath, 'utf8')
+			//all = await fs.readFile(tmpPath, 'utf8')
+			await asyncExec(`./mailman2mbox "${dir}"`)
 			//console.dir(all)
 		} catch (err) {
 			console.error('Error reading temporary file', err)
 		}
 
 		try {
-			await to_messages(all, file)
+			//await to_messages(all, file)
+			await from_mbox(tmpPath.replace('.txt', '.mbox'), file)
 		} catch (err) {
 			console.error(err)
 		}
@@ -286,6 +460,7 @@ async function log_to_messages (all, file) {
 			msg += line + '\n'
 		}
 	}
+
 	/*
 	Date:         Fri, 11 Jan 2002 14:41:20 -0600
 	Reply-To:     Experimental Film Discussion List <FRAMEWORKS@LISTSERV.AOL.COM>
@@ -324,7 +499,8 @@ async function log_to_messages (all, file) {
 			from_name : null,
 
 			subject : null,
-			body : null
+			body : null,
+			complete : escapeStr(encodeURIComponent(m))
 		}
 		for (let l of lines ) {
 			try {
@@ -333,6 +509,11 @@ async function log_to_messages (all, file) {
 					obj.date = moment(obj.date_raw, 'ddd, DD MMM YYYY HH:mm:ss ZZ').unix() * 1000
 				} else if (!obj.subject && _.startsWith(l, 'Subject:')) {
 					obj.subject = l.replace('Subject:', '').trim()
+					if (_.startsWith(obj.subject, '[Frameworks] ')) {
+						obj.subject = obj.subject.replace('[Frameworks] ', '')
+					} else if (_.startsWith(obj.subject, 'Re: [Frameworks] ')) {
+						obj.subject = obj.subject.replace('Re: [Frameworks] ', 'Re: ')
+					}
 				} else if (!obj.from_name && _.startsWith(l, 'From:')) {
 					if (l.indexOf('<') !== -1) {
 						obj.from_name = l.replace('From:', '').trim().split('<')[0].trim()
@@ -358,6 +539,7 @@ async function log_to_messages (all, file) {
 				process.exit(1)
 			}
 		}
+
 		obj.plaintext = '';
 
 		try {
@@ -412,6 +594,7 @@ async function log_to_messages (all, file) {
 					|| match(obj.subject, escapeStr(row.subject))) {
 					console.log(`Already exists`, row.id)
 					found = true
+
 				}
 			}
 			if (!found) {
@@ -419,6 +602,8 @@ async function log_to_messages (all, file) {
 				//console.dir(obj)
 				//console.dir(similar.rows)
 				//process.exit()
+			} else {
+				continue
 			}
 		}
 
@@ -502,7 +687,8 @@ async function html_to_message (html, file, dir) {
 		from_name : null,
 
 		subject : null,
-		body : null
+		body : null,
+		complete : escapeStr(encodeURIComponent(html))
 	}
 	let header = $('p.headers').text().trim()
 	let parts = header.split('\n')
@@ -515,6 +701,11 @@ async function html_to_message (html, file, dir) {
 
 	obj.subject = ($('h1').text() + '')//.replace('[Frameworks] ', '')
 	
+	if (_.startsWith(obj.subject, '[Frameworks] ')) {
+		obj.subject = obj.subject.replace('[Frameworks] ', '')
+	} else if (_.startsWith(obj.subject, 'Re: [Frameworks] ')) {
+		obj.subject = obj.subject.replace('Re: [Frameworks] ', 'Re: ')
+	}
 
 	try {
 		obj.from_name = parts[0].replace('From: ', '').replace(' (email suppressed)', '').replace('email suppressed', '')
@@ -552,7 +743,7 @@ async function html_to_message (html, file, dir) {
 	}
 
 	if (obj.body === null) {
-		return
+		//return
 	}
 
 	obj.id = hash(`${obj.date}-${obj.subject}-${obj.from_name}`)
@@ -694,13 +885,81 @@ async function tsvectors () {
 	}
 }
 
+async function dedupe () {
+
+}
+
+async function threads () {
+	
+}
+
+function matchEmail (rows) {
+	let email = ''
+	let lemail = ''
+	let match = true
+	for (let row of rows) {
+		if (email === '') {
+			email = row.from_email
+			lemail = row.from_email.toLowerCase()
+		} else if (lemail !== row.from_email.toLowerCase()) {
+			match = false
+		}
+	}
+	return match ? email : null
+}
+
+async function fillin () {
+	let where = `original LIKE '%.html%' AND from_email IS NULL AND from_name IS NOT NULL`;
+	let res
+	let match
+	let email
+
+	try {
+		res = await messages.find(where)
+	} catch (err) {
+		console.error(err)
+	}
+	console.log(res.rows.length)
+
+	for (let row of res.rows) {
+		where = `from_name LIKE '${escapeStr(row.from_name)}' AND from_email IS NOT NULL AND ( original LIKE '%.txt%' OR original LIKE '%.txt.gz%')`
+			
+		try {
+			match = await messages.find(where, true)
+		} catch (err) {
+			console.error(err)
+			process.exit()
+		}
+		if (match.rows && match.rows.length > 0) {
+			email = matchEmail(match.rows)
+			if (!email) {
+				console.log(`Inconclusive matches found for ${row.from_name} from ${match.rows.length} matches`)
+				//console.dir(match.rows.map(el => el.from_email))
+				//process.exit()
+			} else {
+				try {
+					await messages.update(`id = '${row.id}'`, { from_email : email }, true)
+					console.log(`Updated ${row.id} with email ${email}`)
+				} catch (err) {
+					console.error(err)
+					process.exit()
+				}
+			}
+			//process.exit()
+		} else {
+			console.log(`No match found for ${row.from_name}`)
+		}
+	}
+}
+
 async function main () {
 	try {
 		await messages.connect()
-		await import_frameworks()
-		await import_archiveorg()
-		await import_hibeam()
-		await tsvectors()
+		//await import_frameworks()
+		//await import_archiveorg()
+		//await import_hibeam()
+		await fillin()
+		//await tsvectors()
 	} catch (err) {
 		console.error(err);
 	}
