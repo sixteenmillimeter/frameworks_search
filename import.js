@@ -432,7 +432,12 @@ async function import_archiveorg () {
 async function import_hibeam () {
 	console.time('import_hibeam')
 	let ARCHIVE = path.join(__dirname, ARCHIVES.hi_beam)
-	let files = await fs.readdir(ARCHIVE)
+	let dirs = await fs.readdir(ARCHIVE)
+	let files;
+	for (let dir of dirs) {
+		files = await fs.readdir(path.join(ARCHIVE, dir))
+		
+	}
 	console.timeEnd('import_hibeam')
 }
 
