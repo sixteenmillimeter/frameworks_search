@@ -18,6 +18,7 @@
   "homepage": "https://github.com/sixteenmillimeter/frameworks_search#readme",
   "dependencies": {
     "cheerio": "^1.0.0-rc.3",
+    "cli-table": "^0.3.1",
     "db": "file:lib/db",
     "fs-extra": "^8.1.0",
     "gzip": "^0.1.0",
