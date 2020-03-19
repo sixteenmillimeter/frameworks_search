@@ -13,6 +13,8 @@ const mbox = require('node-mbox')
 const moment = require('moment')
 const crypto = require('crypto')
 const textract = require('textract')
+const cheerio = require('cheerio')
+const levenshtein = require('fast-levenshtein')
 
 const DB = require('db')
 
@@ -25,6 +27,8 @@ const ARCHIVES = {
 }
 
 const singleRe = new RegExp("'", 'g')
+const newlineRe = new RegExp('\n\n', 'g')
+const qmarkRe = new RegExp('\\?', 'g')
 
 const LOG_DELIMETER = '========================================================================='
 const GZ_DELIMETER = '-------------- next part --------------'
@@ -45,7 +49,12 @@ function hash (str) {
 }
 
 function escapeStr (str) {
-	return str.replace(singleRe, `''`);
+	return str.replace(singleRe, `''`)//.replace(qmarkRe, '\?');
+}
+
+function match (a, b) {
+	let difference = Math.abs(a.length - b.length) + 4
+	return levenshtein.get(a, b) < difference;
 }
 
 async function to_messages (all, file) {
@@ -115,7 +124,6 @@ async function to_messages (all, file) {
 						obj.from_email = l.replace('From:', '').trim()
 						obj.from_email = obj.from_email.replace(' at ', '@')
 					}
-					obj.id = hash(`${obj.date}-${obj.from_email}`)
 				} else if (!obj.from_name && _.startsWith(l, 'An: ')) {
 					if (l.indexOf('(') !== -1) {
 						obj.from_email = l.replace('An: ', '').trim().split('(')[0].trim()
@@ -125,10 +133,10 @@ async function to_messages (all, file) {
 						obj.from_email = l.replace('An: ', '').trim()
 						obj.from_email = obj.from_email.replace(' at ', '@')
 					}
-					obj.id = hash(`${obj.date}-${obj.from_email}`)
 				} else if (!obj.response_to && _.startsWith(l, 'In-Reply-To:')) {
 					obj.response_to = l.replace('In-Reply-To:', '').trim()
 				}
+				obj.id = hash(`${obj.date}-${obj.subject}-${obj.from_email}`)
 				if (obj.body === null && _.startsWith(l, 'Message-ID: ')) {
 					obj.body = ''
 				} else if (typeof obj.body === 'string' && !stopped) {
@@ -155,16 +163,19 @@ async function to_messages (all, file) {
 
 		try {
 			if (obj.subject) {
-				obj.subject = escapeStr(obj.subject)
 				obj.plaintext += obj.subject + '\n'
+				obj.subject = escapeStr(obj.subject)
+				
 			}
 			if (obj.from_name) 	{
-				obj.from_name = escapeStr(obj.from_name)
 				obj.plaintext += obj.subject + '\n'
+				obj.from_name = escapeStr(obj.from_name)
+				
 			}
 			if (obj.body) {
-				obj.body = escapeStr(obj.body)
 				obj.plaintext += obj.body + '\n'
+				obj.body = escapeStr(obj.body)
+				
 			}
 		} catch (err) {
 			console.error('Error escaping', err)
@@ -176,8 +187,16 @@ async function to_messages (all, file) {
 			} catch (err) {
 				console.error(err)
 			}
+			obj.plaintext += obj.body;
+			obj.body = escapeStr(obj.body);
 		}
-		
+
+		if (obj.body === null) {
+			continue;
+		}
+
+		obj.plaintext = escapeStr(obj.plaintext);
+			
 		try {
 			await messages.insert(obj, true)
 			console.log('Inserted', obj.id)
@@ -189,6 +208,9 @@ async function to_messages (all, file) {
 				//console.dir(obj.body)
 			} else {
 				console.error(err)
+				console.warn(`Cannot insert`)
+				//console.dir(obj)
+				//process.exit()
 			}
 		}
 	}
@@ -250,6 +272,7 @@ async function log_to_messages (all, file) {
 	let delimeter_search = lines.find(line => {
 		if (line.trim() === LOG_DELIMETER) return line
 	})
+	let similar
 
 	if (delimeter_search) {
 		delimeter = LOG_DELIMETER
@@ -317,7 +340,7 @@ async function log_to_messages (all, file) {
 					} else {
 						obj.from_email = l.replace('From:', '').trim()
 					}
-					obj.id = hash(`${obj.date}-${obj.from_email}`)
+					
 				} else if (!obj.response_to && _.startsWith(l, 'In-Reply-To:')) {
 					obj.response_to = l.replace('In-Reply-To:', '').trim()
 				}
@@ -328,6 +351,7 @@ async function log_to_messages (all, file) {
 					!_.startsWith(l.toLowerCase(), 'content-transfer-encoding:')) {
 					obj.body += l + '\n'
 				}
+				obj.id = hash(`${obj.date}-${obj.subject}-${obj.from_email}`)
 			} catch (err) {
 				console.error(err)
 				console.log(m)
@@ -338,17 +362,19 @@ async function log_to_messages (all, file) {
 
 		try {
 			if (obj.subject) {
-				obj.subject = escapeStr(obj.subject)
 				obj.plaintext += obj.subject + '\n'
+				obj.subject = escapeStr(obj.subject)
+				
 			}
 			if (obj.from_name) 	{
-				obj.from_name = escapeStr(obj.from_name)
 				obj.plaintext += obj.subject + '\n'
+				obj.from_name = escapeStr(obj.from_name)
 			}
 			if (obj.body) {
-				obj.body = escapeStr(obj.body)
 				obj.plaintext += obj.body + '\n'
+				obj.body = escapeStr(obj.body)
 			}
+			
 		} catch (err) {
 			console.error('Error escaping', err)
 		}
@@ -358,6 +384,41 @@ async function log_to_messages (all, file) {
 				obj.body = await extractText(obj.body)
 			} catch (err) {
 				console.error(err)
+			}
+			obj.plaintext += obj.body
+			obj.body = escapeStr(obj.body)
+		}
+
+		if (obj.body === null) {
+			continue;
+		}
+
+		obj.plaintext = escapeStr(obj.plaintext)
+
+
+		let similarWhere = `date = ${obj.date} OR id = '${obj.id}'`
+
+		try {
+			similar = await messages.find(similarWhere, true)
+		} catch (err) {
+			console.error(err);
+			process.exit()
+		}
+
+		if (similar && similar.rows && similar.rows.length > 0) {
+			let found = false
+			for (let row of similar.rows) {
+				if (obj.id === row.id
+					|| match(obj.subject, escapeStr(row.subject))) {
+					console.log(`Already exists`, row.id)
+					found = true
+				}
+			}
+			if (!found) {
+				console.log(`False alarm`)
+				//console.dir(obj)
+				//console.dir(similar.rows)
+				//process.exit()
 			}
 		}
 
@@ -372,6 +433,7 @@ async function log_to_messages (all, file) {
 				//console.dir(obj.body)
 			} else {
 				console.error(err)
+				process.exit()
 			}
 		}
 	}
@@ -395,7 +457,7 @@ async function extractText (html) {
 			} catch (err) {
 				log.error('Error erasing tmp file', err)
 			}
-			return resolve(escapeStr(text))
+			return resolve(text)
 		})
 	})
 }
@@ -429,14 +491,173 @@ async function import_archiveorg () {
 	process.exit()
 }
 
+async function html_to_message (html, file, dir) {
+	const $ = cheerio.load(html)
+	const obj = {
+		date_raw : null,
+		date : null,
+		original : file,
+		response_to : null,
+		from_email : null,
+		from_name : null,
+
+		subject : null,
+		body : null
+	}
+	let header = $('p.headers').text().trim()
+	let parts = header.split('\n')
+	let bodyHtml = (html.split('<!-- body="start" -->')[1] + '' ).split('_______________________________________________\n<br>\nFrameWorks mailing list')[0]
+	let links = $('ul.links li')
+	let link
+	let body
+	let similar
+	let lines
+
+	obj.subject = ($('h1').text() + '')//.replace('[Frameworks] ', '')
+	
+
+	try {
+		obj.from_name = parts[0].replace('From: ', '').replace(' (email suppressed)', '').replace('email suppressed', '')
+		//'Tue Aug 31 2010 - 10:23:39 PDT'
+		obj.date_raw = parts[1].replace('Date: ', '')
+		obj.date = obj.date = moment(obj.date_raw, 'ddd MMM DD YYYY - HH:mm:ss ZZ').unix() * 1000
+
+	} catch (err) {
+		lines = html.split('\n')
+		header = lines.find(row => {
+			if (row.indexOf('<!-- sent="') !== -1) {
+				return true
+			}
+			return false
+		})
+		//Tue, 31 Aug 2010 13:23:39 -0400
+		obj.date_raw = header.trim().replace('<!-- sent="', '').replace('" -->', '').split('(')[0]
+		obj.date = obj.date = moment(obj.date_raw, 'ddd, D MMM YYYY HH:mm:ss ZZ').unix() * 1000
+	}
+
+	if (obj.from_name === '') {
+		obj.from_name = null
+	}
+
+	for (let i = 0; i < links.length; i++) {
+		link = $('ul.links li').eq(i).text();
+		if (link.indexOf('In reply to:') !== -1) {
+			obj.response_to = path.join(dir, $('ul.links li').eq(i).find('a').attr('href'))
+		}
+	}
+
+	if (!obj.body) {
+		body = cheerio.load(bodyHtml)
+		obj.body = (body.text() + '').replace(newlineRe, '\n');
+	}
+
+	if (obj.body === null) {
+		return
+	}
+
+	obj.id = hash(`${obj.date}-${obj.subject}-${obj.from_name}`)
+	
+	//console.dir(obj)
+
+	obj.plaintext = '';
+
+	try {
+		if (obj.subject) {
+			obj.plaintext += obj.subject + '\n'
+			obj.subject = escapeStr(obj.subject)
+		}
+		if (obj.from_name) 	{
+			obj.plaintext += obj.subject + '\n'
+			obj.from_name = escapeStr(obj.from_name)
+		}
+		if (obj.body) {
+			obj.plaintext += obj.body + '\n'
+			obj.body = escapeStr(obj.body)
+		}
+		obj.plaintext = escapeStr(obj.plaintext)
+	} catch (err) {
+		console.error('Error escaping', err)
+	}
+
+	//process.exit()
+
+	let similarWhere = `date = ${obj.date} OR id = '${obj.id}'`
+
+	try {
+		similar = await messages.find(similarWhere, true)
+	} catch (err) {
+		console.error(err);
+		process.exit()
+	}
+
+	if (similar && similar.rows && similar.rows.length > 0) {
+		let found = false
+		for (let row of similar.rows) {
+			if (obj.id === row.id
+				|| match(obj.subject, escapeStr(row.subject))) {
+				console.log(`Already exists`, row.id)
+				found = true
+				return
+			}
+		}
+		if (!found) {
+			console.log(`False alarm`)
+			//console.dir(obj)
+			//console.dir(similar.rows)
+			//process.exit()
+		}
+	}
+
+	try {
+		//console.dir(obj)
+		await messages.insert(obj, true)
+		console.log('Inserted', obj.id )
+	} catch (err) {
+		if (err.code === '23505') {
+			console.warn('Already exists', obj.id)
+			//console.dir(obj.body)
+		} else {
+			console.error(err)
+			process.exit()
+		}
+	}
+
+}
+
+const hibeam_blacklist = [
+	'attachment.html',
+	'author.html',
+	'date.html',
+	'index.html',
+	'subject.html'
+]
+
 async function import_hibeam () {
 	console.time('import_hibeam')
 	let ARCHIVE = path.join(__dirname, ARCHIVES.hi_beam)
 	let dirs = await fs.readdir(ARCHIVE)
 	let files;
+	let html;
 	for (let dir of dirs) {
+		//console.log(path.join(ARCHIVE, dir))
 		files = await fs.readdir(path.join(ARCHIVE, dir))
-		
+		for (let file of files) {
+			if  (hibeam_blacklist.indexOf(file) === -1) {
+				//console.log(path.join(ARCHIVE, dir, file))
+				try {
+					html = await fs.readFile(path.join(ARCHIVE, dir, file), 'utf8')
+				} catch (err) {
+					console.error(err)
+				}
+
+				try {
+					await html_to_message(html, path.join(dir, file), dir)
+				} catch (err) {
+					console.error(err)
+				}
+
+			}
+		}
 	}
 	console.timeEnd('import_hibeam')
 }
@@ -476,10 +697,10 @@ async function tsvectors () {
 async function main () {
 	try {
 		await messages.connect()
-		//await import_frameworks()
-		//await import_archiveorg()
-		//await import_hibeam();
-		//await tsvectors()
+		await import_frameworks()
+		await import_archiveorg()
+		await import_hibeam()
+		await tsvectors()
 	} catch (err) {
 		console.error(err);
 	}

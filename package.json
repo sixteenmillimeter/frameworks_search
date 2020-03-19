@@ -20,6 +20,7 @@
     "cheerio": "^1.0.0-rc.3",
     "cli-table": "^0.3.1",
     "db": "file:lib/db",
+    "fast-levenshtein": "^2.0.6",
     "fs-extra": "^8.1.0",
     "gzip": "^0.1.0",
     "lodash": "^4.17.15",
