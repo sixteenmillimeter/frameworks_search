@@ -23,7 +23,7 @@
     "fast-levenshtein": "^2.0.6",
     "fs-extra": "^8.1.0",
     "gzip": "^0.1.0",
-    "lodash": "^4.17.15",
+    "lodash": "^4.17.19",
     "moment": "^2.24.0",
     "node-mbox": "^1.0.0",
     "pg": "^7.18.2",
