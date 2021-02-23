@@ -971,8 +971,8 @@ async function main () {
 	try {
 		await messages.connect()
 		await import_frameworks()
-		await import_archiveorg()
-		await import_hibeam()
+		//await import_archiveorg()
+		//await import_hibeam()
 		await fillin()
 		await tsvectors()
 	} catch (err) {

@@ -17,16 +17,16 @@
   },
   "homepage": "https://github.com/sixteenmillimeter/frameworks_search#readme",
   "dependencies": {
-    "cheerio": "^1.0.0-rc.3",
-    "cli-table": "^0.3.1",
+    "cheerio": "^1.0.0-rc.5",
+    "cli-table": "^0.3.5",
     "db": "file:lib/db",
-    "fast-levenshtein": "^2.0.6",
-    "fs-extra": "^8.1.0",
+    "fast-levenshtein": "^3.0.0",
+    "fs-extra": "^9.1.0",
     "gzip": "^0.1.0",
-    "lodash": "^4.17.15",
-    "moment": "^2.24.0",
+    "lodash": "^4.17.21",
+    "moment": "^2.29.1",
     "node-mbox": "^1.0.0",
-    "pg": "^7.18.2",
+    "pg": "^8.5.1",
     "squel": "^5.13.0",
     "textract": "^2.5.0"
   }

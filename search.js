@@ -18,13 +18,13 @@ function getTerm() {
 
 function display (rows) {
 	const table = new Table({
-	    head: ['date', 'subject', 'headline']
-		, colWidths: [48, 32, 40]
+	    head: ['date', 'from', 'headline']
+		, colWidths: [48, 48, 48]
 	})
 
 	for (let row of rows) {
 		table.push( [ row.date_raw, row.subject + '', row.headline.slice(0, 40) ] )
-		table.push( [ row.id, '', ''] )
+		table.push( [ row.id, `${row.from_name} <${row.from_email}>`, ''] )
 	}
 
 	console.log(table.toString())
@@ -32,7 +32,7 @@ function display (rows) {
 
 async function search () {
 	const cleanTerm = getTerm()
-	const searchQuery = `SELECT id,subject,date,date_raw,rank,headline 
+	const searchQuery = `SELECT id,subject,date,date_raw,rank,headline,from_name,from_email 
 		FROM messages, 
 			plainto_tsquery('${cleanTerm}') AS query, 
 			ts_rank_cd(fulltext, query, 32) AS rank, 
